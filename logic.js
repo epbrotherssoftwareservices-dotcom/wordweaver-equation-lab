@@ -304,7 +304,7 @@ async function exportWord() {
     
     try {
         // En producción, cambiaremos esta URL por la de Render
-        const apiUrl = 'https://wordweaver-api-abcd.onrender.com/api/export_word';
+        const apiUrl = 'https://https://wordweaver-api-gbrz.onrender.com/api/export_word';
         
         const response = await fetch(apiUrl, {
             method: 'POST',
