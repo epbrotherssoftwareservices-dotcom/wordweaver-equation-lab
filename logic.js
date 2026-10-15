@@ -95,8 +95,33 @@ function preprocessNotebookLM(text) {
     return res;
 }
 
+function preprocessAntigravity(text) {
+    let res = text;
+    // 1. Limpieza exhaustiva de comandos y trazas de herramientas del agente
+    res = res.replace(/Ran command:\s*`[\s\S]*?`\s*/gi, '');
+    res = res.replace(/Ran command:[^\n]*\n?/gi, '');
+    res = res.replace(/Created\s+[\w\.\-\\\/]+\s*\n?/gi, '');
+    res = res.replace(/Task id[^\n]*\n?/gi, '');
+    res = res.replace(/The command exited with code \d+\.\s*/gi, '');
+    
+    // 2. Limpiar enlaces locales file:/// de Windows y dejar solo el nombre del archivo en negrita
+    res = res.replace(/\[([^\]]+)\]\(file:\/\/\/[^\)]+\)/g, '**$1**');
+    
+    // 3. Convertir bloques Mermaid en nota descriptiva limpia para Word/PDF
+    res = res.replace(/```mermaid[\s\S]*?```/g, '\n> 📊 *[Diagrama de flujo Mermaid]*\n');
+    
+    return res;
+}
+
 function preprocessGeneric(text) {
     let res = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    
+    // Limpiar trazas de comandos de agentes/IDE (ej: Ran command: `python -c ...` o Created script.py)
+    // Esto evita que el Firewall (WAF) de Cloudflare/Render lo bloquee por parecer un intento de inyección de comandos (RCE)
+    res = res.replace(/Ran command:\s*`[\s\S]*?`\s*/gi, '');
+    res = res.replace(/Ran command:[^\n]*\n?/gi, '');
+    res = res.replace(/Created\s+[\w\.\-\\\/]+\s*\n?/gi, '');
+    res = res.replace(/Task id[^\n]*\n?/gi, '');
     
     // Normalizar ecuaciones que vienen con doble barra invertida (muy común al copiar de NotebookLM)
     res = res.replace(/\\\\\(/g, '\\(');
@@ -118,6 +143,7 @@ function preprocessText(text, aiSource) {
     else if (source.includes("google")) text = preprocessGoogleIA(text);
     else if (source.includes("notebooklm")) text = preprocessNotebookLM(text);
     else if (source.includes("gemini")) text = preprocessGemini(text);
+    else if (source.includes("antigravity")) text = preprocessAntigravity(text);
 
     return text;
 }
@@ -196,19 +222,27 @@ async function prepareContent(forWord = false) {
         return id;
     });
 
-    // Inline $...$ o \(...\)
-    processedText = processedText.replace(/\$([^\n$]+?)\$/g, (match, p1) => {
+    // Proteger montos monetarios ($208.20, ~$500, etc.) antes de buscar fórmulas inline
+    processedText = processedText.replace(/([~\|\s]|^)\$(\d+)/g, '$1TEMP_CURR_$2');
+
+    // Inline \(...\)
+    processedText = processedText.replace(/\\\(([\s\S]+?)\\\)/g, (match, p1) => {
         let id = `MATHINLINEPLACEHOLDER${mathId}XYZ`;
         mathBlocks.push({ id: id, tex: p1, display: false });
         mathId++;
         return id;
     });
-    processedText = processedText.replace(/\\\(([^\n]+?)\\\)/g, (match, p1) => {
+
+    // Inline $...$ (solo si no empieza ni termina con espacios y no contiene barras de tabla |)
+    processedText = processedText.replace(/(?<!\\)\$(?!\s)([^$\n|]+?)(?<!\s)\$/g, (match, p1) => {
         let id = `MATHINLINEPLACEHOLDER${mathId}XYZ`;
         mathBlocks.push({ id: id, tex: p1, display: false });
         mathId++;
         return id;
     });
+
+    // Restaurar montos monetarios protegidos
+    processedText = processedText.replace(/TEMP_CURR_/g, '$');
 
     // 3. Convertir Markdown a HTML (Asegura las tablas y formato texto)
     let htmlContent = marked.parse(processedText);
@@ -328,13 +362,15 @@ async function exportWord() {
         // Ejemplo: const apiUrl = 'https://wordweaver-api-abcd.onrender.com/api/export_word';
         const apiUrl = 'https://wordweaver-api-gbrz.onrender.com/api/export_word';
 
+        const cleanedText = preprocessText(rawText, aiSource);
+
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                text: rawText,
+                text: cleanedText,
                 aiSource: aiSource,
                 fontName: fontName,
                 fontSize: fontSize
