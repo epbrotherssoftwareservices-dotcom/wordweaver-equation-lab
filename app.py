@@ -62,6 +62,22 @@ def download_word(file_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/visits', methods=['GET'])
+def proxy_visits():
+    import urllib.request
+    import json
+    try:
+        # Actuamos como puente para evadir los bloqueadores de rastreadores de Edge
+        url = 'https://counterapi.com/api/wordweaver_emil_paz/visits/up'
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            val = data.get('value', data.get('count', 1))
+            return jsonify({'count': val, 'value': val})
+    except Exception as e:
+        print(f"Error fetching visits: {e}")
+        return jsonify({'count': '-'}), 200
+
 if __name__ == '__main__':
     # Para desarrollo local
     app.run(debug=True, port=5000)
