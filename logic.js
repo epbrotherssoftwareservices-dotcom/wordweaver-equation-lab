@@ -23,23 +23,29 @@ function applyLang(lang) {
 
 function setStatus(msgKey, type) {
     const statusEl = document.getElementById('statusMessage');
+    if (!statusEl) return;
     statusEl.className = `status-message status-${type}`;
-    
+
     const messages = {
         'processing': { es: 'Procesando ecuaciones...', en: 'Processing equations...' },
         'pdf_success': { es: '¡PDF generado con éxito!', en: 'PDF successfully generated!' },
         'word_success': { es: '¡Documento Word (.doc) generado con éxito!', en: 'Word document (.doc) successfully generated!' },
         'empty_error': { es: 'Por favor, pega algún texto primero.', en: 'Please paste some text first.' },
         'pasted': { es: 'Texto pegado.', en: 'Text pasted.' },
-        'cleared': { es: 'Texto limpiado.', en: 'Text cleared.' }
+        'cleared': { es: 'Texto limpiado.', en: 'Text cleared.' },
+        'success': { es: '¡Ecuaciones listas!', en: 'Equations ready!' },
+        'general_error': { es: 'Error al conectar con el servidor. Por favor, reintenta en unos segundos.', en: 'Connection error with the server. Please retry in a few seconds.' },
+        'server_error': { es: 'Error del servidor al procesar el documento.', en: 'Server error processing document.' }
     };
 
-    statusEl.textContent = messages[msgKey][currentLang];
-    
-    // Clear after 3 seconds if it's a success or info message
-    if (type !== 'processing') {
+    const entry = messages[msgKey];
+    const textToShow = (entry && entry[currentLang]) ? entry[currentLang] : (msgKey || '');
+    statusEl.textContent = textToShow;
+
+    // Limpiar mensaje después de 3 segundos si es éxito o info
+    if (type !== 'processing' && textToShow) {
         setTimeout(() => {
-            if (statusEl.textContent === messages[msgKey][currentLang]) {
+            if (statusEl.textContent === textToShow) {
                 statusEl.textContent = '';
             }
         }, 3000);
@@ -91,6 +97,14 @@ function preprocessNotebookLM(text) {
 
 function preprocessGeneric(text) {
     let res = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    
+    // Normalizar ecuaciones que vienen con doble barra invertida (muy común al copiar de NotebookLM)
+    res = res.replace(/\\\\\(/g, '\\(');
+    res = res.replace(/\\\\\)/g, '\\)');
+    res = res.replace(/\\\\\[/g, '\\[');
+    res = res.replace(/\\\\\]/g, '\\]');
+    
+    // Asegurar saltos de línea correctos en bloques matemáticos con $$
     res = res.replace(/([^\n])\$\$/g, '$1\n$$$$');
     res = res.replace(/\$\$([^\n])/g, '$$$$\n$1');
     return res;
@@ -99,22 +113,29 @@ function preprocessGeneric(text) {
 function preprocessText(text, aiSource) {
     text = preprocessGeneric(text);
     const source = aiSource.toLowerCase();
-    
+
     if (source.includes("deepseek")) text = preprocessDeepSeek(text);
     else if (source.includes("google")) text = preprocessGoogleIA(text);
     else if (source.includes("notebooklm")) text = preprocessNotebookLM(text);
     else if (source.includes("gemini")) text = preprocessGemini(text);
-    
+
     return text;
 }
+
+// Traducciones de la UI
+const translations = {
+    // ...
+};
 
 // ── Sistema de Visitantes ──
 async function initVisitorCounter() {
     try {
-        // Utilizamos una API pública y gratuita para llevar el conteo
-        const response = await fetch('https://api.counterapi.dev/v1/wordweaver_emil_paz/visits/up');
+        // Obtenemos las visitas a través de NUESTRO PROPIO backend para evitar
+        // que navegadores estrictos (Edge) o AdBlockers bloqueen el contador.
+        const apiUrl = 'https://wordweaver-api-gbrz.onrender.com/api/visits';
+        const response = await fetch(apiUrl);
         const data = await response.json();
-        document.getElementById('visitCount').innerText = data.count;
+        document.getElementById('visitCount').innerText = data.count || "-";
     } catch (error) {
         console.error("No se pudo cargar el contador de visitas:", error);
         document.getElementById('visitCount').innerText = "-";
@@ -124,7 +145,7 @@ async function initVisitorCounter() {
 // ── Inicialización ──
 document.addEventListener('DOMContentLoaded', () => {
     initVisitorCounter();
-    
+
     document.getElementById('markdownInput').addEventListener('input', () => {
         const val = document.getElementById('markdownInput').value;
         if (val) {
@@ -149,18 +170,18 @@ async function prepareContent(forWord = false) {
     }
 
     setStatus('processing', 'info');
-    
+
     const aiSource = document.getElementById('aiSource').value;
     const fontName = document.getElementById('fontSelect').value;
     const fontSize = document.getElementById('fontSize').value;
-    
+
     // 1. Preprocesar texto de la IA
     let processedText = preprocessText(rawText, aiSource);
-    
+
     // 2. Proteger las ecuaciones para que marked.js no rompa subíndices (_) o asteriscos (*)
     let mathBlocks = [];
     let mathId = 0;
-    
+
     // Bloques $$...$$ o \[...\]
     processedText = processedText.replace(/\$\$([\s\S]+?)\$\$/g, (match, p1) => {
         let id = `MATHBLOCKPLACEHOLDER${mathId}XYZ`;
@@ -174,7 +195,7 @@ async function prepareContent(forWord = false) {
         mathId++;
         return id;
     });
-    
+
     // Inline $...$ o \(...\)
     processedText = processedText.replace(/\$([^\n$]+?)\$/g, (match, p1) => {
         let id = `MATHINLINEPLACEHOLDER${mathId}XYZ`;
@@ -191,32 +212,32 @@ async function prepareContent(forWord = false) {
 
     // 3. Convertir Markdown a HTML (Asegura las tablas y formato texto)
     let htmlContent = marked.parse(processedText);
-    
+
     // INYECCIÓN DE ESTILOS EN LÍNEA PARA TABLAS DE WORD
     if (forWord) {
         htmlContent = htmlContent.replace(/<table\b[^>]*>/g, '<table border="1" cellpadding="5" cellspacing="0" style="border-collapse: collapse; width: 100%; border: 1px solid #000;">');
         htmlContent = htmlContent.replace(/<th\b[^>]*>/g, '<th style="background-color: #4472C4; color: white; font-weight: bold; border: 1px solid #000; text-align: center; padding: 5px;">');
         htmlContent = htmlContent.replace(/<td\b[^>]*>/g, '<td style="border: 1px solid #000; padding: 5px;">');
     }
-    
+
     // 4. Restaurar / Procesar matemáticas
     if (forWord) {
         // Para Word: Generamos MathML nativo
         for (let block of mathBlocks) {
             try {
                 // MathJax.tex2mmlPromise es la API oficial asíncrona para la web
-                let mmlString = await MathJax.tex2mmlPromise(block.tex, {display: block.display});
-                
+                let mmlString = await MathJax.tex2mmlPromise(block.tex, { display: block.display });
+
                 // Asegurar que el namespace esté presente para Word
                 if (!mmlString.includes('xmlns:mml')) {
                     mmlString = mmlString.replace('<math', '<math xmlns:mml="http://www.w3.org/1998/Math/MathML"');
                 }
-                
+
                 // Si es bloque, centrarlo
                 if (block.display) {
                     mmlString = `<div align="center" style="text-align: center; margin: 10px 0;">${mmlString}</div>`;
                 }
-                
+
                 htmlContent = htmlContent.replace(block.id, mmlString);
             } catch (e) {
                 console.error("MathJax conversion error:", e);
@@ -225,7 +246,7 @@ async function prepareContent(forWord = false) {
                 htmlContent = htmlContent.replace(block.id, fallback);
             }
         }
-        
+
         // Aplicar la fuente configurada al HTML crudo y retornarlo INMEDIATAMENTE
         // (Sin inyectarlo en el DOM para evitar que el navegador elimine los namespaces MathML)
         htmlContent = `<div style="font-family: '${fontName}', sans-serif; font-size: ${fontSize}pt;">${htmlContent}</div>`;
@@ -237,20 +258,20 @@ async function prepareContent(forWord = false) {
             htmlContent = htmlContent.replace(block.id, texStr);
         }
     }
-    
+
     // 5. Inyectar en el DOM (Solo para PDF/Vista Web)
     const renderArea = document.getElementById('renderArea');
     renderArea.innerHTML = htmlContent;
-    
+
     // Aplicar estilos generales
     renderArea.style.fontFamily = fontName;
     renderArea.style.fontSize = fontSize + 'pt';
-    
+
     if (!forWord) {
         // Renderizar visualmente con HTML/SVG (MathJax normal)
         await MathJax.typesetPromise([renderArea]);
     }
-    
+
     return { success: true };
 }
 
@@ -266,11 +287,11 @@ async function exportPDF() {
     renderArea.style.display = 'block';
 
     const opt = {
-        margin:       1,
-        filename:     filename,
-        image:        { type: 'jpeg', quality: 0.98 },
-        html2canvas:  { scale: 2, windowWidth: 800 },
-        jsPDF:        { unit: 'in', format: 'letter', orientation: 'portrait' }
+        margin: 1,
+        filename: filename,
+        image: { type: 'jpeg', quality: 0.98 },
+        html2canvas: { scale: 2, windowWidth: 800 },
+        jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
     };
 
     html2pdf().set(opt).from(renderArea).save().then(() => {
@@ -290,22 +311,23 @@ async function exportWord() {
     const aiSource = document.getElementById('aiSource').value;
     const fontName = document.getElementById('fontSelect').value;
     const fontSize = document.getElementById('fontSize').value;
-    
+
     setStatus('processing', 'info');
-    
+
     const btn = document.getElementById('btnWord');
     const originalBtnHTML = btn.innerHTML;
     const isEnglish = document.documentElement.getAttribute('data-lang') === 'en';
-    
+
     // Cambiar botón a estado de carga
     btn.disabled = true;
     btn.style.opacity = '0.7';
     btn.innerHTML = isEnglish ? '⏳ Processing... (May take a moment)' : '⏳ Procesando... (Puede tardar un momento)';
-    
+
     try {
-        // En producción, cambiaremos esta URL por la de Render
-        const apiUrl = 'https://https://wordweaver-api-gbrz.onrender.com/api/export_word';
-        
+        // MUY IMPORTANTE: Asegúrate de que esta URL sea la de Render para producción
+        // Ejemplo: const apiUrl = 'https://wordweaver-api-abcd.onrender.com/api/export_word';
+        const apiUrl = 'https://wordweaver-api-gbrz.onrender.com/api/export_word';
+
         const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
@@ -318,27 +340,56 @@ async function exportWord() {
                 fontSize: fontSize
             })
         });
-        
+
         if (!response.ok) {
             throw new Error(`Error del servidor: ${response.status}`);
         }
         
-        const result = await response.json();
+        // Revisamos qué nos respondió el servidor (JSON nuevo o Archivo viejo)
+        const contentType = response.headers.get('content-type');
         
-        if (result.success && result.download_url) {
-            // El servidor procesó el documento y está listo en una URL.
-            // Para asegurar máxima compatibilidad con navegadores estrictos (Chrome/Edge)
-            // usamos window.location.href. Esto descarga el archivo nativamente sin importar el tiempo de espera.
+        if (contentType && contentType.includes('application/json')) {
+            // --- NUEVO SISTEMA (2 Pasos) ---
+            const result = await response.json();
             
-            const baseUrl = apiUrl.replace('/api/export_word', '');
-            const finalUrl = baseUrl + result.download_url + `?filename=${encodeURIComponent(result.filename)}`;
-            
-            // Iniciar la descarga real
-            window.location.href = finalUrl;
-            
-            setStatus('success', 'success');
+            if (result.success && result.download_url) {
+                const baseUrl = apiUrl.replace('/api/export_word', '');
+                const finalUrl = baseUrl + result.download_url + `?filename=${encodeURIComponent(result.filename)}`;
+                
+                const link = document.createElement('a');
+                link.href = finalUrl;
+                link.setAttribute('download', result.filename);
+                document.body.appendChild(link);
+                link.click();
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                }, 200);
+
+                setStatus('word_success', 'success');
+            } else {
+                throw new Error("El servidor no devolvió una respuesta válida");
+            }
         } else {
-            throw new Error("El servidor no devolvió una respuesta válida");
+            // --- VIEJO SISTEMA (Compatibilidad hacia atrás) ---
+            const blob = await response.blob();
+            
+            if (window.navigator && window.navigator.msSaveOrOpenBlob) {
+                window.navigator.msSaveOrOpenBlob(blob, `Documento_${aiSource.replace(/ /g, "_")}.docx`);
+            } else {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = `Documento_${aiSource.replace(/ /g, "_")}.docx`;
+                document.body.appendChild(a);
+                a.click();
+                
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    window.URL.revokeObjectURL(url);
+                }, 500);
+            }
+            setStatus('success', 'success');
         }
         
     } catch (error) {
